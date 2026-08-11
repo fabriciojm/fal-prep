@@ -1,0 +1,24 @@
+[tools]
+python = "3.12"
+uv = "latest"
+ruff = "latest"
+
+[tasks.setup]
+run = "./scripts/setup.sh"
+
+[tasks.install]
+description = "Install python dependencies"
+run = "uv sync"
+
+[tasks.dev]
+description = "Run the FastAPI App"
+run = "uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+
+[tasks.test]
+description = "Run tests"
+run = "uv run pytest"
+
+[tasks.lint]
+description = "Run ruf"
+run = "uv run ruff check ."
+

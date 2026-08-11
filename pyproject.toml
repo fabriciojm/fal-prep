@@ -1,0 +1,17 @@
+[project]
+name = "fal-prep"
+version = "0.1.0"
+description = "Small FastAPI exercises for fal.ai interview prep"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",
+    "ruff",
+]

@@ -1,0 +1,7 @@
+{
+  "build": {
+    "context": "..",
+    "dockerfile": "Dockerfile"
+  },
+  "postCreateCommand": "mise run setup && pip install -r requirements.txt"
+}
