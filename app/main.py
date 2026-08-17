@@ -1,137 +1,127 @@
-from datetime import UTC, datetime
+from contextlib import asynccontextmanager
 from enum import Enum
-from uuid import uuid4
+
+import uuid
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel
 import asyncio
-from asyncio import Queue
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+
+# I'll write a Job class, a JobStatus class, CreateJobRequest
+# Have a fake runner (async)
+# I'll have a JobService that will have
+#  - async submit_job -> create and enqueue job
+#  - get_job -> poll jobs
+#  - async process_job -> process single job id
+#  - async worker_loop -> waits for jobs and processes them
+# I'll write a thin http layer
+#
 
 
 class JobStatus(str, Enum):
-    IN_QUEUE = "IN_QUEUE"
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-
-
-class JobCreate(BaseModel):
-    prompt: str = Field(min_length=1, max_length=500)
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Job(BaseModel):
     id: str
     prompt: str
-    status: JobStatus
-    created_at: datetime
-    updated_at: datetime
+    status: JobStatus = JobStatus.PENDING
     result: str | None = None
-    optional: str | None = None
+    error: str | None = None
 
 
-async def fake_model_inference(prompt: str) -> str:
-    await asyncio.sleep(3)
-    return f"Generated result for prompt: {prompt}"
+class CreateJobRequest(BaseModel):
+    prompt: str
 
 
-async def worker_loop() -> None:
-    while True:
-        job_id = await job_queue.get()
+class FakeRunner:
+    async def run(self, prompt: str) -> str:
+        await asyncio.sleep(3)
+
+        if "fail" in prompt.lower():
+            raise RuntimeError("fake runner failure")
+
+        return f"Generated result for prompt: {prompt}"
+
+
+class JobService:
+    def __init__(self, runner: FakeRunner):
+        self.runner = runner
+        self.jobs: dict[str, Job] = {}
+        self.queue: asyncio.Queue[str] = asyncio.Queue()
+
+    async def submit_job(self, prompt: str) -> Job:
+        job = Job(
+            id=str(uuid.uuid4()),
+            prompt=prompt,
+        )
+        self.jobs[job.id] = job
+        await self.queue.put(job.id)
+
+        return job
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self.jobs.get(job_id)
+
+    async def process_job(self, job_id: str) -> None:
+        job = self.jobs.get(job_id)
+
+        if job is None:
+            return
+
+        job.status = JobStatus.PROCESSING
 
         try:
-            job = jobs.get(job_id)
+            result = await self.runner.run(job.prompt)
 
-            if job is None:
-                continue
-
-            if job.status != JobStatus.IN_QUEUE:
-                continue
-
-            running = job.model_copy(
-                update={
-                    "status": JobStatus.IN_PROGRESS,
-                    "updated_at": now_utc(),
-                }
-            )
-            jobs[job_id] = running
-
-            result = await fake_model_inference(running.prompt)
-
-            completed = running.model_copy(
-                update={
-                    "status": JobStatus.COMPLETED,
-                    "updated_at": now_utc(),
-                    "result": result,
-                }
-            )
-            jobs[job_id] = completed
+            job.result = result
+            job.status = JobStatus.COMPLETED
 
         except Exception as exc:
-            job = jobs.get(job_id)
+            job.error = str(exc)
+            job.status = JobStatus.FAILED
 
-            if job is not None:
-                failed = job.model_copy(
-                    update={
-                        "status": JobStatus.FAILED,
-                        "updated_at": now_utc(),
-                        "error": str(exc),
-                    }
-                )
-                jobs[job_id] = failed
+    async def worker_loop(self) -> None:
+        while True:
+            job_id = await self.queue.get()
 
-        finally:
-            job_queue.task_done()
+            try:
+                await self.process_job(job_id)
+            finally:
+                self.queue.task_done()
 
 
+runner = FakeRunner()
+job_service = JobService(runner)
+
+
+# HTTP layer
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    worker_task = asyncio.create_task(worker_loop())
-
+async def lifespan(app: FastAPI):
+    worker_task = asyncio.create_task(job_service.worker_loop())
     try:
         yield
+    # Shutdown code
     finally:
         worker_task.cancel()
 
 
-app = FastAPI(title="Mini fal.ai Queue", lifespan=lifespan)
-
-jobs: dict[str, Job] = {}
-job_queue: Queue[str] = Queue()
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
+app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/healthz")
-def healthz() -> dict:
-    return {"status": "ok"}
+# Two methods: POST to submit a job and GET to poll the job store
+#
+@app.post("/jobs")
+async def create_job(request: CreateJobRequest) -> Job:
+    return await job_service.submit_job(request.prompt)
 
 
-@app.post("/jobs", response_model=Job)
-async def create_job(payload: JobCreate) -> Job:
-    job_id = str(uuid4())
-    timestamp = now_utc()
-
-    job = Job(
-        id=job_id,
-        prompt=payload.prompt,
-        status=JobStatus.IN_QUEUE,
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
-
-    jobs[job_id] = job
-    await job_queue.put(job_id)
-
-    return job
-
-@app.get("/jobs/{job_id}", response_model=Job)
-def get_job(job_id: str) -> Job:
-    job = jobs.get(job_id)
+@app.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> Job:
+    job = job_service.get_job(job_id)
 
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -139,64 +129,14 @@ def get_job(job_id: str) -> Job:
     return job
 
 
-@app.get("/jobs", response_model=list[Job])
-def list_jobs() -> list[Job]:
-    return list(jobs.values())
+async def main() -> None:
+    job = await job_service.submit_job("A GPU serverless platform")
+
+    print(job)
+    print(job_service.get_job(job.id))
+    print(job_service.queue.qsize())
 
 
-@app.post("/jobs/{job_id}/cancel", response_model=Job)
-def cancel_job(job_id: str) -> Job:
-    job = jobs.get(job_id)
-
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot cancel job with status {job.status}",
-        )
-    updated = job.model_copy(
-        update={
-            "status": JobStatus.CANCELLED,
-            "updated_at": now_utc(),
-        }
-    )
-    jobs[job_id] = updated
-    return updated
-
-
-@app.post("/jobs/{job_id}/process", response_model=Job)
-def process_job(job_id: str) -> Job:
-    job = jobs.get(job_id)
-
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if job.status != JobStatus.IN_QUEUE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot process job with status {job.status}",
-        )
-
-    running = job.model_copy(
-        update={
-            "status": JobStatus.IN_PROGRESS,
-            "updated_at": now_utc(),
-        }
-    )
-
-    jobs[job_id] = running
-
-    completed = running.model_copy(
-        update={
-            "status": JobStatus.COMPLETED,
-            "updated_at": now_utc(),
-            "result": f"Generated result for prompt {running.prompt}",
-        }
-    )
-
-    jobs[job_id] = completed
-
-    return completed
+if __name__ == "__main__":
+    asyncio.run(main())
 
