@@ -1,17 +1,9 @@
 [project]
-name = "fal-prep"
+name = "laf-api"
 version = "0.1.0"
-description = "Small FastAPI exercises for fal.ai interview prep"
+description = "An API for laf slow inference"
 requires-python = ">=3.12"
-dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "pydantic",
-]
+dependencies = ["fastapi", "uvicorn[standard]", "pydantic"]
 
 [dependency-groups]
-dev = [
-    "pytest",
-    "httpx",
-    "ruff",
-]
+dev = ["pytest", "httpx", "ruff"]
