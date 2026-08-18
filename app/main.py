@@ -1,21 +1,15 @@
+import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from enum import Enum
 
-import uuid
+import httpx
+import os
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import asyncio
 
-# I'll write a Job class, a JobStatus class, CreateJobRequest
-# Have a fake runner (async)
-# I'll have a JobService that will have
-#  - async submit_job -> create and enqueue job
-#  - get_job -> poll jobs
-#  - async process_job -> process single job id
-#  - async worker_loop -> waits for jobs and processes them
-# I'll write a thin http layer
-#
+INFERENCE_URL = os.getenv("INFERENCE_URL", "http://localhost:8000/generate")
 
 
 class JobStatus(str, Enum):
@@ -37,18 +31,29 @@ class CreateJobRequest(BaseModel):
     prompt: str
 
 
-class FakeRunner:
+class InferenceRunner:
+    def __init__(self, endpoint: str):
+        self.endpoint = endpoint
+
     async def run(self, prompt: str) -> str:
-        await asyncio.sleep(3)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self.endpoint,
+                json={
+                    "prompt": prompt,
+                },
+                timeout=120,
+            )
 
-        if "fail" in prompt.lower():
-            raise RuntimeError("fake runner failure")
+        response.raise_for_status()
 
-        return f"Generated result for prompt: {prompt}"
+        data = response.json()
+
+        return data["result"]
 
 
 class JobService:
-    def __init__(self, runner: FakeRunner):
+    def __init__(self, runner: InferenceRunner):
         self.runner = runner
         self.jobs: dict[str, Job] = {}
         self.queue: asyncio.Queue[str] = asyncio.Queue()
@@ -94,7 +99,7 @@ class JobService:
                 self.queue.task_done()
 
 
-runner = FakeRunner()
+runner = InferenceRunner(INFERENCE_URL)
 job_service = JobService(runner)
 
 
@@ -139,4 +144,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
