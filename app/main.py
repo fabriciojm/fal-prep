@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-INFERENCE_URL = os.getenv("INFERENCE_URL", "http://localhost:8000/generate")
+INFERENCE_URL = os.getenv("INFERENCE_URL", "http://guama:8000/generate")
 
 
 class JobStatus(str, Enum):
