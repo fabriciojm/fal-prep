@@ -5,8 +5,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      INFERENCE_HOST: "http://guama:8000"
-      INFERENCE_ENDPOINT: "/generate"
+      INFERENCE_SERVICE_URL: "http://guama:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 30s
