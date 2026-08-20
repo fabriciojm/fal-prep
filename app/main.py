@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from enum import Enum
+from datetime import UTC, datetime
 
 import httpx
 import os
@@ -25,6 +26,8 @@ class Job(BaseModel):
     status: JobStatus = JobStatus.PENDING
     result: str | None = None
     error: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CreateJobRequest(BaseModel):
@@ -58,10 +61,18 @@ class JobService:
         self.jobs: dict[str, Job] = {}
         self.queue: asyncio.Queue[str] = asyncio.Queue()
 
+    def now(self) -> datetime:
+        return datetime.now(UTC)
+
     async def submit_job(self, prompt: str) -> Job:
+        timestamp = self.now()
+
         job = Job(
             id=str(uuid.uuid4()),
             prompt=prompt,
+            status=JobStatus.PENDING,
+            created_at=timestamp,
+            updated_at=timestamp,
         )
         self.jobs[job.id] = job
         await self.queue.put(job.id)
@@ -78,6 +89,7 @@ class JobService:
             return
 
         job.status = JobStatus.PROCESSING
+        job.updated_at = self.now()
 
         try:
             result = await self.runner.run(job.prompt)
