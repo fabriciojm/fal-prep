@@ -1,6 +1,6 @@
 # laf-api
 
-Small FastAPI api for providing image generation (like fal.ai).
+Small FastAPI api for providing image generation (like fal.ai). Look at the last generations [here](https://laf.fabriciojm.com)
 
 This repo currently implements a minimal in-memory job queue API. Clients submit prompt jobs, a background worker calls a model inference runner, and the API exposes endpoints for checking/handling jobs. The model inference runner calls a container specified in (fal-inference)[https://github.com/fabriciojm/laf-inference]
 
