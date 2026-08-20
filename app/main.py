@@ -8,7 +8,8 @@ import httpx
 import os
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 INFERENCE_URL = os.getenv("INFERENCE_URL", "http://guama:8000/generate")
 
@@ -24,14 +25,14 @@ class Job(BaseModel):
     id: str
     prompt: str
     status: JobStatus = JobStatus.PENDING
-    result: str | None = None
+    image_url: str | None = None
     error: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class CreateJobRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=500)
 
 
 class InferenceRunner:
@@ -129,8 +130,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-# Two methods: POST to submit a job and GET to poll the job store
-#
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.post("/jobs")
 async def create_job(request: CreateJobRequest) -> Job:
     return await job_service.submit_job(request.prompt)
@@ -144,6 +148,38 @@ async def get_job(job_id: str) -> Job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     return job
+
+
+@app.get("/jobs")
+async def list_jobs() -> list[Job]:
+    return job_service.list_jobs()
+
+
+@app.get("/status")
+async def status() -> dict:
+    return {
+        "queue_size": job_service.queue.qsize(),
+        "jobs_total": len(job_service.jobs),
+    }
+
+
+@app.get("/images/{image_id}")
+async def get_image(image_id: str):
+    image_url = f"{INFERENCE_SERVICE_URL}/images/{image_id}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(image_url)
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=404,
+            detail="image not found",
+        )
+
+    return StreamingResponse(
+        iter([response.content]),
+        media_type="image/png",
+    )
 
 
 async def main() -> None:
