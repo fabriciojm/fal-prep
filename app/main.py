@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-INFERENCE_URL = os.getenv("INFERENCE_URL", "http://guama:8000/generate")
+INFERENCE_SERVICE_URL = os.getenv("INFERENCE_SERVICE_URL", "http://guama:8000")
 
 
 class JobStatus(str, Enum):
@@ -36,10 +36,10 @@ class CreateJobRequest(BaseModel):
 
 
 class InferenceRunner:
-    def __init__(self, endpoint: str):
-        self.endpoint = endpoint
+    def __init__(self, base_url: str):
+        self.endpoint = f"{base_url}/generate"
 
-    async def run(self, prompt: str) -> str:
+    async def run(self, prompt: str) -> dict:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 self.endpoint,
@@ -53,7 +53,7 @@ class InferenceRunner:
 
         data = response.json()
 
-        return data["result"]
+        return data
 
 
 class JobService:
@@ -83,6 +83,9 @@ class JobService:
     def get_job(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
 
+    def list_jobs(self) -> list[Job]:
+        return list(self.jobs.values())
+
     async def process_job(self, job_id: str) -> None:
         job = self.jobs.get(job_id)
 
@@ -95,12 +98,20 @@ class JobService:
         try:
             result = await self.runner.run(job.prompt)
 
-            job.result = result
-            job.status = JobStatus.COMPLETED
+            if result["success"]:
+                job.status = JobStatus.COMPLETED
+                job.image_url = f"/images/{result['image_id']}"
+                job.error = None
+            else:
+                job.status = JobStatus.FAILED
+                job.error = result.get("error", result.get("message"))
 
         except Exception as exc:
-            job.error = str(exc)
             job.status = JobStatus.FAILED
+            job.error = str(exc)
+
+        finally:
+            job.updated_at = self.now()
 
     async def worker_loop(self) -> None:
         while True:
@@ -112,7 +123,7 @@ class JobService:
                 self.queue.task_done()
 
 
-runner = InferenceRunner(INFERENCE_URL)
+runner = InferenceRunner(INFERENCE_SERVICE_URL)
 job_service = JobService(runner)
 
 
