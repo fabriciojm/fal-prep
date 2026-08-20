@@ -2,7 +2,7 @@
 
 Small FastAPI api for providing image generation (like fal.ai). Look at the last generations [here](https://laf.fabriciojm.com)
 
-This repo currently implements a minimal in-memory job queue API. Clients submit prompt jobs, a background worker calls a model inference runner, and the API exposes endpoints for checking/handling jobs. The model inference runner calls a container specified in (fal-inference)[https://github.com/fabriciojm/laf-inference]
+This repo currently implements a minimal in-memory job queue API. Clients submit prompt jobs, a background worker calls a model inference runner, and the API exposes endpoints for checking/handling jobs. The model inference runner calls a container specified in [laf-inference](https://github.com/fabriciojm/laf-inference).
 
 This service (api+inference+dashboard) is currently running in [my homelab](https://github.com/fabriciojm/homelab) kubernetes cluster. Follow that link if you want to see the kubernetes manfests used (under `apps/`).
 
