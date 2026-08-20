@@ -1,6 +1,6 @@
 services:
   laf-api:
-    image: ghcr.io/fabriciojm/laf-api:test
+    image: ghcr.io/fabriciojm/laf-api:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
